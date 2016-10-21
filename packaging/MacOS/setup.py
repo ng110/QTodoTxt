@@ -38,10 +38,10 @@ collect_packages('.', '', packages, excludes=['test'])
 # ======================================
 # Setup parameters
 setup(name='qtodotxt',
-      version='1.4.0',
-      author='Matthieu Nantern',
-      author_email='matthieu.nantern@gmail.com',
-      url='https://github.com/mNantern/QTodoTxt',
+      version='1.5.0',
+      author='QTT Development Team',
+      author_email='qtodotxt@googlegroups.com',
+      url='https://github.com/QTodoTxt/QTodoTxt',
       packages=packages,
       app=["qtodotxt/app.py"],
       setup_requires=["py2app"],
@@ -51,7 +51,7 @@ setup(name='qtodotxt',
       options={
           "py2app": {
               "iconfile": "artwork/icon/icon.icns",
-              "includes": ['PySide.QtCore', 'PySide.QtGui'],
+              "includes": ['PyQt5.QtCore', 'PyQt5.QtGui'],
               "resources": resources,
           },
           "build": {

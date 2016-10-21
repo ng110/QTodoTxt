@@ -1,133 +1,159 @@
-from PySide import QtCore
-from PySide import QtGui
-from qtodotxt.lib import settings
-from qtodotxt.lib import todolib
+from PyQt5 import QtCore
+from PyQt5 import QtGui
+from PyQt5 import QtWidgets
+
+from qtodotxt.lib import tasklib
+from qtodotxt.lib.task_htmlizer import TaskHtmlizer
 from qtodotxt.ui.resource_manager import getIcon
+
 from datetime import date
-from functools import cmp_to_key
+
+import os
 
 
 class TasksListController(QtCore.QObject):
 
-    taskModified = QtCore.Signal(todolib.Task)
-    taskCreated = QtCore.Signal(todolib.Task)
-    taskArchived = QtCore.Signal(todolib.Task)
-    taskDeleted = QtCore.Signal(todolib.Task)
+    taskModified = QtCore.pyqtSignal(tasklib.Task)
+    taskCreated = QtCore.pyqtSignal(tasklib.Task)
+    taskArchived = QtCore.pyqtSignal(tasklib.Task)
+    taskDeleted = QtCore.pyqtSignal(tasklib.Task)
 
     def __init__(self, view, task_editor_service):
         QtCore.QObject.__init__(self)
-        self._view = view
+        self.view = view
         self._task_editor_service = task_editor_service
-        self._view.taskActivated.connect(self.editTask)
+        self._task_htmlizer = TaskHtmlizer()
+        self.view.taskActivated.connect(self.editTask)
         self._initCreateTaskAction()
-        self._initDeleteSelectedTasksAction()
+        self._initEditTaskAction()
+        self._initCopySelectedTasksAction()
+        if int(QtCore.QSettings().value("show_delete", 0)):
+            self._initDeleteSelectedTasksAction()
         self._initCompleteSelectedTasksAction()
         self._initDecreasePrioritySelectedTasksAction()
         self._initIncreasePrioritySelectedTasksAction()
-        self._settings = settings.Settings()
+
+    def _initEditTaskAction(self):
+        action = QtWidgets.QAction(getIcon('TaskEdit.png'), '&Edit Task', self)
+        action.setShortcuts(['Ctrl+E'])
+        action.triggered.connect(self.editTask)
+        self.view.addListAction(action)
+        self.editTaskAction = action
 
     def _initCreateTaskAction(self):
-        action = QtGui.QAction(getIcon('add.png'), '&Create Task', self)
+        action = QtWidgets.QAction(getIcon('TaskCreate.png'), '&Create New Task', self)
         action.setShortcuts(['Insert', 'Ctrl+I', 'Ctrl+N'])
         action.triggered.connect(self.createTask)
-        self._view.addListAction(action)
+        self.view.addListAction(action)
         self.createTaskAction = action
 
+    def _initCopySelectedTasksAction(self):
+        action = QtWidgets.QAction(getIcon('TaskCopy.png'), 'Copy Selected Tasks', self)
+        action.setShortcuts([QtGui.QKeySequence.Copy])
+        action.triggered.connect(self._copySelectedTasks)
+        self.view.addListAction(action)
+        self.copySelectedTasksAction = action
+
     def _initDeleteSelectedTasksAction(self):
-        action = QtGui.QAction(getIcon('delete.png'), '&Delete Selected Tasks', self)
+        action = QtWidgets.QAction(getIcon('TaskDelete.png'), '&Delete Selected Tasks', self)
         action.setShortcut('Delete')
         action.triggered.connect(self._deleteSelectedTasks)
-        self._view.addListAction(action)
+        self.view.addListAction(action)
         self.deleteSelectedTasksAction = action
 
     def _initCompleteSelectedTasksAction(self):
-        action = QtGui.QAction(getIcon('x.png'), 'C&omplete Selected Tasks', self)
+        action = QtWidgets.QAction(getIcon('TaskComplete.png'), 'C&omplete Selected Tasks', self)
         action.setShortcuts(['x', 'c'])
         action.triggered.connect(self._completeSelectedTasks)
-        self._view.addListAction(action)
+        self.view.addListAction(action)
         self.completeSelectedTasksAction = action
 
     def _initDecreasePrioritySelectedTasksAction(self):
-        action = QtGui.QAction(getIcon('decrease.png'), 'Decrease priority', self)
+        action = QtWidgets.QAction(getIcon('TaskPriorityDecrease.png'), 'Decrease Priority', self)
         action.setShortcuts(['-', '<'])
         action.triggered.connect(self._decreasePriority)
-        self._view.addListAction(action)
+        self.view.addListAction(action)
         self.decreasePrioritySelectedTasksAction = action
 
     def _initIncreasePrioritySelectedTasksAction(self):
-        action = QtGui.QAction(getIcon('increase.png'), 'Increase priority', self)
+        action = QtWidgets.QAction(getIcon('TaskPriorityIncrease.png'), 'Increase Priority', self)
         action.setShortcuts(['+', '>'])
         action.triggered.connect(self._increasePriority)
-        self._view.addListAction(action)
+        self.view.addListAction(action)
         self.increasePrioritySelectedTasksAction = action
 
     def completeTask(self, task):
-        date_string = date.today().strftime('%Y-%m-%d')
         if not task.is_complete:
-            task.text = 'x %s %s' % (date_string, task.text)
-            self._settings.load()
-            if self._settings.getAutoArchive():
-                self.taskArchived.emit(task)
-            else:
-                self.taskModified.emit(task)
+            task.setCompleted()
+        else:
+            task.setPending()
+        if int(QtCore.QSettings().value("auto_archive", 0)):
+            self.taskArchived.emit(task)
+        else:
+            self.taskModified.emit(task)
 
     def _completeSelectedTasks(self):
-        tasks = self._view.getSelectedTasks()
+        tasks = self.view.getSelectedTasks()
         if tasks:
-            if self._confirmTasksAction(tasks, 'Complete'):
+            confirm = int(QtCore.QSettings().value("confirm_complete", 1))
+            if not confirm or self._confirmTasksAction(tasks, 'Toggle Completeness of'):
                 for task in tasks:
                     self.completeTask(task)
 
     def _deleteSelectedTasks(self):
-        tasks = self._view.getSelectedTasks()
+        tasks = self.view.getSelectedTasks()
         if tasks:
             if self._confirmTasksAction(tasks, 'Delete'):
                 for task in tasks:
-                    self._view.removeTask(task)
+                    self.view.removeTask(task)
                     self.taskDeleted.emit(task)
 
     def _confirmTasksAction(self, tasks, messagePrefix):
         if len(tasks) == 1:
-            message = '%s "%s"?' % (messagePrefix, tasks[0].text)
+            message = '<b>%s the following task?</b><ul>' % messagePrefix
         else:
-            message = '%s %d tasks?' % (messagePrefix, len(tasks))
-
-        result = QtGui.QMessageBox.question(self._view, 'Confirm', message,
-                                            buttons=QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
-                                            defaultButton=QtGui.QMessageBox.Yes)
-
-        return result == QtGui.QMessageBox.Yes
+            message = '<b>%s the following tasks?</b><ul>' % messagePrefix
+        for task in tasks:
+            message += '<li>%s</li>' % self._task_htmlizer.task2html(task)
+        message += '</ul>'
+        result = QtWidgets.QMessageBox.question(self.view,
+                                                'Confirm',
+                                                message,
+                                                buttons=QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                                                defaultButton=QtWidgets.QMessageBox.Yes
+                                                )
+        return result == QtWidgets.QMessageBox.Yes
 
     def _decreasePriority(self):
-        tasks = self._view.getSelectedTasks()
+        tasks = self.view.getSelectedTasks()
         if tasks:
             for task in tasks:
                 task.decreasePriority()
-                self._view.updateTask(task)
+                self.view.updateTask(task)
                 self.taskModified.emit(task)
 
     def _increasePriority(self):
-        tasks = self._view.getSelectedTasks()
+        tasks = self.view.getSelectedTasks()
         if tasks:
             for task in tasks:
                 task.increasePriority()
-                self._view.updateTask(task)
+                self.view.updateTask(task)
                 self.taskModified.emit(task)
 
     def showTasks(self, tasks):
-        previouslySelectedTasks = self._view.getSelectedTasks()
-        self._view.clear()
+        previouslySelectedTasks = self.view.getSelectedTasks()
+        self.view.clear()
         self._sortTasks(tasks)
         for task in tasks:
-            self._view.addTask(task)
+            self.view.addTask(task)
         self._reselect(previouslySelectedTasks)
 
     def _reselect(self, tasks):
         for task in tasks:
-            self._view.selectTaskByText(task.text)
+            self.view.selectTaskByText(task.text)
 
     def _sortTasks(self, tasks):
-        tasks.sort(key=cmp_to_key(todolib.compareTasks))
+        tasks.sort(reverse=True)
 
     def _addCreationDate(self, text):
         date_string = date.today().strftime('%Y-%m-%d')
@@ -137,23 +163,38 @@ class TasksListController(QtCore.QObject):
             text = '%s %s' % (date_string, text)
         return text
 
-
     def createTask(self):
         (text, ok) = self._task_editor_service.createTask()
         if ok and text:
-            self._settings.load()
-            if self._settings.getCreateDate():
+            if int(QtCore.QSettings().value("add_created_date", 0)):
                 text = self._addCreationDate(text)
-            task = todolib.Task(text)
-            self._view.addTask(task)
-            self._view.clearSelection()
-            self._view.selectTask(task)
+            task = tasklib.Task(text)
+            self.view.addTask(task)
+            self.view.clearSelection()
+            self.view.selectTask(task)
             self.taskCreated.emit(task)
 
-    def editTask(self, task):
+    def editTask(self, task=None):
+        if not task:
+            tasks = self.view.getSelectedTasks()
+            # FIXME: instead of this we should disable icon when no task or serveral tasks are selected
+            if len(tasks) == 0:
+                print("No task selected")
+                return
+            elif len(tasks) > 1:
+                print("More than one task selected")
+                return
+            task = tasks[0]
         (text, ok) = self._task_editor_service.editTask(task)
         if ok and text:
             if text != task.text:
-                task.text = text
-                self._view.updateTask(task)
+                task.parseLine(text)
+                self.view.updateTask(task)
                 self.taskModified.emit(task)
+
+    def _copySelectedTasks(self):
+        tasks = self.view.getSelectedTasks()
+        if tasks:
+            text = "".join(str(task) + os.linesep for task in tasks)
+            app = QtWidgets.QApplication.instance()
+            app.clipboard().setText(text)

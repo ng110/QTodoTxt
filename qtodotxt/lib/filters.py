@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta
 
 
 class BaseFilter(object):
@@ -15,6 +16,10 @@ class BaseFilter(object):
 
         """
         self.text = text
+
+    def __str__(self):
+        return "Filter:{}".format(self.__class__.__name__)
+    __repr__ = __str__
 
     def isMatch(self, task):
         """
@@ -35,6 +40,15 @@ class BaseFilter(object):
         if type(other) == type(self):
             return self.text == other.text
         return False
+
+
+class AllTasksFilter(BaseFilter):
+    """
+    Task list filter that returns all tasks.
+
+    """
+    def __init__(self):
+        BaseFilter.__init__(self, 'All')
 
 
 class IncompleteTasksFilter(BaseFilter):
@@ -58,7 +72,7 @@ class UncategorizedTasksFilter(BaseFilter):
         BaseFilter.__init__(self, 'Uncategorized')
 
     def isMatch(self, task):
-        return (not task.is_complete) and (not task.contexts) and (not task.projects)
+        return (not task.contexts) and (not task.projects)
 
 
 class CompleteTasksFilter(BaseFilter):
@@ -83,7 +97,7 @@ class ContextFilter(BaseFilter):
         BaseFilter.__init__(self, context)
 
     def isMatch(self, task):
-        return (not task.is_complete) and (self.text in task.contexts)
+        return self.text in task.contexts
 
     def __str__(self):
         return "ContextFilter(%s)" % self.text
@@ -98,10 +112,132 @@ class ProjectFilter(BaseFilter):
         BaseFilter.__init__(self, project)
 
     def isMatch(self, task):
-        return (not task.is_complete) and (self.text in task.projects)
+        return self.text in task.projects
 
     def __str__(self):
         return "ProjectFilter(%s)" % self.text
+
+
+class DueFilter(BaseFilter):
+    """
+    Due list filter for ranges
+
+    """
+    def __init__(self, dueRange):
+        BaseFilter.__init__(self, dueRange)
+
+    def isMatch(self, task):
+        return self.text in task.dueRanges
+
+    def __str__(self):
+        return "DueFilter(%s)" % self.text
+
+
+class DueTodayFilter(BaseFilter):
+    """
+    Task list filter allowing only incomplete tasks that are due today.
+
+    """
+    def __init__(self, dueRange):
+        BaseFilter.__init__(self, dueRange)
+
+    def isMatch(self, task):
+        if (not task.due):
+            return False
+        else:
+            self.due_date = task.due
+            today = datetime.today().date()
+            return self.due_date == today
+
+    def __str__(self):
+        return "DueTodayFilter(%s)" % self.text
+
+
+class DueTomorrowFilter(BaseFilter):
+    """
+    Task list filter allowing only incomplete tasks that are due tomorrow.
+
+    """
+    def __init__(self, dueRange):
+        BaseFilter.__init__(self, dueRange)
+
+    def isMatch(self, task):
+        if not task.due:
+            return False
+        else:
+            due_date = task.due
+            today = datetime.today().date()
+            return today < due_date <= today + timedelta(days=1)
+
+    def __str__(self):
+        return "DueTomorrowFilter(%s)" % self.text
+
+
+class DueThisWeekFilter(BaseFilter):
+    """
+    Task list filter allowing only incomplete tasks that are due this week.
+
+    """
+    def __init__(self, dueRange):
+        BaseFilter.__init__(self, dueRange)
+
+    def isMatch(self, task):
+        if not task.due:
+            return False
+        else:
+            due_date = task.due
+            today = datetime.today().date()
+            return today <= due_date <= today + timedelta((6 - today.weekday()) % 7)
+
+    def __str__(self):
+        return "DueThisWeekFilter(%s)" % self.text
+
+
+class DueThisMonthFilter(BaseFilter):
+    """
+    Task list filter allowing only incomplete tasks that are due this month.
+
+    """
+    def __init__(self, dueRange):
+        BaseFilter.__init__(self, dueRange)
+
+    def isMatch(self, task):
+        if not task.due:
+            return False
+        else:
+            due_date = task.due
+            today = datetime.today().date()
+            if today.month == 12:
+                last_day_of_month = today.replace(day=31)
+            else:
+                last_day_of_month = today.replace(month=today.month + 1, day=1) - timedelta(days=1)
+            return today <= due_date <= last_day_of_month
+
+    def __str__(self):
+        return "DueThisMonthFilter(%s)" % self.text
+
+
+class DueOverdueFilter(BaseFilter):
+    """
+    Task list filter allowing only incomplete tasks that are overdue.
+
+    """
+    def __init__(self, dueRange):
+        BaseFilter.__init__(self, dueRange)
+
+    def isMatch(self, task):
+        if not task.due:
+            return False
+        else:
+            if not task.due:
+                return False
+            else:
+                due_date = task.due
+                today = datetime.today().date()
+                return due_date < today
+
+    def __str__(self):
+        return "DueOverdueFilter(%s)" % self.text
 
 
 class HasProjectsFilter(BaseFilter):
@@ -114,7 +250,7 @@ class HasProjectsFilter(BaseFilter):
         BaseFilter.__init__(self, 'Projects')
 
     def isMatch(self, task):
-        return (not task.is_complete) and task.projects
+        return task.projects
 
     def __str__(self):
         return "HasProjectsFilter" % self.text
@@ -130,10 +266,55 @@ class HasContextsFilter(BaseFilter):
         BaseFilter.__init__(self, 'Contexts')
 
     def isMatch(self, task):
-        return (not task.is_complete) and task.contexts
+        return task.contexts
 
     def __str__(self):
         return "HasContextsFilter" % self.text
+
+
+class HasDueDateFilter(BaseFilter):
+    """
+    Task list filter allowing only complete tasks with due date in due ranges.
+
+    """
+
+    def __init__(self):
+        BaseFilter.__init__(self, 'DueRange')
+
+    def isMatch(self, task):
+        return task.due
+
+    def __str__(self):
+        return "HasDueDateFilter" % self.text
+
+
+class HasDueRangesFilter(BaseFilter):
+    """
+    Task list filter allowing only complete tasks with due date in due ranges.
+
+    """
+
+    def __init__(self):
+        BaseFilter.__init__(self, 'DueRange')
+
+    def isMatch(self, task):
+        return task.dueRanges
+
+    def __str__(self):
+        return "HasDueRangesFilter" % self.text
+
+
+def simpleTextFilterRepl(matchObj):
+    """
+    Return a search string based on the matchObj
+
+    Replace function used in SimpleTextFilter isMatch, needed to allow for inverted(not) searching
+
+    """
+    if(matchObj.group(1)):
+        return "^(?!.*" + matchObj.group(2) + ")"
+    else:
+        return "^(?=.*" + matchObj.group(2) + ")"
 
 
 class SimpleTextFilter(BaseFilter):
@@ -151,14 +332,13 @@ class SimpleTextFilter(BaseFilter):
     def isMatch(self, task):
         """
         Return a boolean based on whether the supplied task satisfies self.text.
-        TODO: the NOT syntax described below isn't yet implemented
 
         This filter can handle basic and/or/not conditions. The syntax is as
         follows:
 
         :AND   :   ',' or whitespace (' ')
         :OR    :   '|'
-        :NOT   :   prefixed '~' or '!'  {not yet implemented}
+        :NOT   :   prefixed '~' or '!'
 
         These operators follow the following order of precedence: OR, AND, NOT.
         So, for example:
@@ -183,21 +363,24 @@ class SimpleTextFilter(BaseFilter):
         automatically. So the search string '(B)' will match '(B) nail its
         feet to the perch'.
         """
-        # TODO: implement NOT conditions
         mymatch = False
-        comp = re.compile(r'\s*([\(\)\w\\\-]+)[\s,]*', re.U)
-        restring = comp.sub(r'^(?=.*\1)', self.text, re.U)
+        comp = re.compile(r'\s*([\!~])?([\(\)\w\\\-]+)[\s,]*', re.U)
+        restring = comp.sub(simpleTextFilterRepl, self.text, re.U)
         try:
             if ')' in restring:
-                raise re.error  # otherwise adding closing parenth avoids error here
+                raise re.error('')  # otherwise adding closing parenth avoids error here
             mymatch = re.search(restring, task.text, re.I | re.U)
         except re.error:
             comp2 = re.compile(r'\s*\((?=[^?])', re.U)
             restring2 = comp2.sub(r'\\(', restring, re.U)
             comp3 = re.compile(r'(?<!\))\)(?=\))', re.U)
             restring3 = comp3.sub(r'\\)', restring2, re.U)
-            mymatch = re.search(restring3, task.text, re.I | re.U)
-
+            """temporary solution: user input illegal characters in the
+            search string (+,?,\) otherwise the program crashed"""
+            try:
+                mymatch = re.search(restring3, task.text, re.I | re.U)
+            except Exception:
+                mymatch = True
         return mymatch
 
     def __str__(self):

@@ -1,8 +1,9 @@
-from functools import cmp_to_key
 import logging
 import os
-from PySide import QtCore
-from qtodotxt.lib.todolib import Task, compareTasks
+from PyQt5 import QtCore
+from qtodotxt.lib.filters import DueTodayFilter, DueTomorrowFilter, DueThisWeekFilter, DueThisMonthFilter, \
+    DueOverdueFilter
+from qtodotxt.lib.tasklib import Task
 from sys import version
 import time
 
@@ -44,6 +45,10 @@ class File(object):
         self.tasks = []
         self.filename = ''
 
+    def __str__(self):
+        return "File(filename:{}, tasks:{})".format(self.filename, self.tasks)
+    __repr__ = __str__
+
     def load(self, filename):
 
         try:
@@ -70,7 +75,7 @@ class File(object):
             self.filename = self._createNewFilename()
         elif filename:
             self.filename = filename
-        self.tasks.sort(key=cmp_to_key(compareTasks))
+        self.tasks.sort(reverse=True)
         self._saveTasks()
 
     @staticmethod
@@ -101,97 +106,138 @@ class File(object):
         except IOError as e:
             raise ErrorSavingFile("Error saving to file '%s'" % doneFilename, e)
 
-    def getAllCompletedContexts(self):
+    def getAllContexts(self, return_completed=False):
         contexts = dict()
         for task in self.tasks:
-            if task.is_complete:
+            if return_completed or not task.is_complete:
                 for context in task.contexts:
+                    count = 0 if task.is_complete else 1
                     if context in contexts:
-                        contexts[context] += 1
+                        contexts[context] += count
                     else:
-                        contexts[context] = 1
+                        contexts[context] = count
         return contexts
 
-    def getAllCompletedProjects(self):
+    def getAllProjects(self, return_completed=False):
         projects = dict()
         for task in self.tasks:
-            if task.is_complete:
+            if return_completed or not task.is_complete:
                 for project in task.projects:
+                    count = 0 if task.is_complete else 1
                     if project in projects:
-                        projects[project] += 1
+                        projects[project] += count
                     else:
-                        projects[project] = 1
+                        projects[project] = count
         return projects
 
-    def getAllContexts(self):
-        contexts = dict()
-        for task in self.tasks:
-            if not task.is_complete:
-                for context in task.contexts:
-                    if context in contexts:
-                        contexts[context] += 1
-                    else:
-                        contexts[context] = 1
-        return contexts
+    def getAllDueRanges(self, return_completed=False):
+        dueRanges = dict()
+        # This determines the sorting of the ranges in the tree view. Lowest value first.
+        rangeSorting = {'Today': 20,
+                        'Tomorrow': 30,
+                        'This week': 40,
+                        'This month': 50,
+                        'Overdue': 10}
 
-    def getAllProjects(self):
-        projects = dict()
         for task in self.tasks:
-            if not task.is_complete:
-                for project in task.projects:
-                    if project in projects:
-                        projects[project] += 1
-                    else:
-                        projects[project] = 1
-        return projects
+            if not return_completed and task.is_complete:
+                continue
+
+            count = 0 if task.is_complete else 1
+            if DueTodayFilter('Today').isMatch(task):
+                if not ('Today' in dueRanges):
+                    dueRanges['Today'] = count
+                else:
+                    dueRanges['Today'] += count
+
+            if DueTomorrowFilter('Tomorrow').isMatch(task):
+                if not ('Tomorrow' in dueRanges):
+                    dueRanges['Tomorrow'] = count
+                else:
+                    dueRanges['Tomorrow'] += count
+
+            if DueThisWeekFilter('This week').isMatch(task):
+                if not ('This week' in dueRanges):
+                    dueRanges['This week'] = count
+                else:
+                    dueRanges['This week'] += count
+
+            if DueThisMonthFilter('This month').isMatch(task):
+                if not ('This month' in dueRanges):
+                    dueRanges['This month'] = count
+                else:
+                    dueRanges['This month'] += count
+
+            if DueOverdueFilter('Overdue').isMatch(task):
+                if not ('Overdue' in dueRanges):
+                    dueRanges['Overdue'] = count
+                else:
+                    dueRanges['Overdue'] += count
+
+        return dueRanges, rangeSorting
 
     def getTasksCounters(self):
         counters = dict({'Pending': 0,
                          'Uncategorized': 0,
                          'Contexts': 0,
                          'Projects': 0,
-                         'Complete': 0})
+                         'Complete': 0,
+                         'DueCompl': 0,
+                         'ProjCompl': 0,
+                         'ContCompl': 0,
+                         'UncatCompl': 0,
+                         'Due': 0})
         for task in self.tasks:
+            nbProjects = len(task.projects)
+            nbContexts = len(task.contexts)
             if not task.is_complete:
                 counters['Pending'] += 1
-                nbProjects = len(task.projects)
-                nbContexts = len(task.contexts)
                 if nbProjects > 0:
                     counters['Projects'] += 1
                 if nbContexts > 0:
                     counters['Contexts'] += 1
                 if nbContexts == 0 and nbProjects == 0:
                     counters['Uncategorized'] += 1
+                if task.due:
+                    counters['Due'] += 1
             else:
                 counters['Complete'] += 1
+                if nbProjects > 0:
+                    counters['ProjCompl'] += 1
+                if nbContexts > 0:
+                    counters['ContCompl'] += 1
+                if nbContexts == 0 and nbProjects == 0:
+                    counters['UncatCompl'] += 1
+                if task.due:
+                    counters['DueCompl'] += 1
         return counters
 
 
 class FileObserver(QtCore.QFileSystemWatcher):
-   def __init__(self, parent, file):
-       logger.debug('Setting up FileObserver instance.')
-       super().__init__(parent)
-       self._file = file
-       self.fileChanged.connect(self.fileChangedHandler)
+    def __init__(self, parent, file):
+        logger.debug('Setting up FileObserver instance.')
+        super().__init__(parent)
+        self._file = file
+        self.fileChanged.connect(self.fileChangedHandler)
 
-   @QtCore.Slot(str)
-   def fileChangedHandler(self, path):
-       logger.debug('Detected change on {}\nremoving it from watchlist'.format(path))
-       self.removePath(path)
-       debug_counter = 0
-       if path == self._file.filename:
-           max_time = time.time() + 1
-           while time.time() < max_time:
-               try:
-                   self.parent().openFileByName(self._file.filename)  # TODO make that emit a signal
-               except ErrorLoadingFile:
-                   time.sleep(0.01)
-                   debug_counter += 1
-               else:
-                   logger.debug('It took {} additional attempts until the file could be read.'.format(debug_counter))
-                   break
+    @QtCore.pyqtSlot(str)
+    def fileChangedHandler(self, path):
+        logger.debug('Detected change on {}\nremoving it from watchlist'.format(path))
+        self.removePath(path)
+        debug_counter = 0
+        if path == self._file.filename:
+            max_time = time.time() + 1
+            while time.time() < max_time:
+                try:
+                    self.parent().openFileByName(self._file.filename)  # TODO make that emit a signal
+                except ErrorLoadingFile:
+                    time.sleep(0.01)
+                    debug_counter += 1
+                else:
+                    logger.debug('It took {} additional attempts until the file could be read.'.format(debug_counter))
+                    break
 
-   def clear(self):
-       if self.files():
-           logger.debug('Clearing watchlist.')
-           self.removePaths(self.files())
+    def clear(self):
+        if self.files():
+            logger.debug('Clearing watchlist.')
+            self.removePaths(self.files())

@@ -1,16 +1,17 @@
-from PySide import QtCore
-from PySide import QtGui
+from PyQt5 import QtCore
+from PyQt5 import QtWidgets
 from qtodotxt.lib.task_htmlizer import TaskHtmlizer
-from qtodotxt.lib import todolib
+from qtodotxt.lib import tasklib
 
 
-class TasksListView(QtGui.QListWidget):
+class TasksListView(QtWidgets.QListWidget):
 
-    taskActivated = QtCore.Signal(todolib.Task)
+    taskActivated = QtCore.pyqtSignal(tasklib.Task)
 
     def __init__(self, parent=None):
         super(TasksListView, self).__init__(parent)
-        self.setLayoutMode(self.LayoutMode.Batched)
+        self.setLayoutMode(self.Batched)
+        self.setAlternatingRowColors(True)
         self._task_htmlizer = TaskHtmlizer()
         self._initUI()
         self._oldSelected = []
@@ -18,6 +19,13 @@ class TasksListView(QtGui.QListWidget):
     def addTask(self, task):
         item = TaskListWidgetItem(task, self)
         label = self._createLabel(task)
+        label.setWordWrap(True)
+        # set minimum width to a reasonable value to get a useful
+        # sizeHint _height_ when using word wrap
+        label.setMinimumWidth(self.width() - 20)
+        # set items size and add some space between items
+        item.setSizeHint(QtCore.QSize(label.sizeHint().width(),
+                                      label.sizeHint().height() + 5))
         self.setItemWidget(item, label)
 
     def addListAction(self, action):
@@ -25,12 +33,12 @@ class TasksListView(QtGui.QListWidget):
 
     def _initUI(self):
         self.setSelectionMode(
-            QtGui.QAbstractItemView.SelectionMode.ExtendedSelection)
+            QtWidgets.QAbstractItemView.ExtendedSelection)
         self.itemDoubleClicked.connect(self._list_itemActivated)
         self.itemSelectionChanged.connect(self._list_itemPressed)
 
     def _createLabel(self, task):
-        label = QtGui.QLabel()
+        label = QtWidgets.QLabel()
         label.setTextFormat(QtCore.Qt.RichText)
         label.setOpenExternalLinks(True)
         text = self._task_htmlizer.task2html(task)
@@ -103,12 +111,12 @@ class TasksListView(QtGui.QListWidget):
             if len(items) > 0:
                 self._list_itemActivated(items[-1])
         else:
-            QtGui.QListWidget.keyPressEvent(self, event)
+            QtWidgets.QListWidget.keyPressEvent(self, event)
             return
 
 
-class TaskListWidgetItem(QtGui.QListWidgetItem):
+class TaskListWidgetItem(QtWidgets.QListWidgetItem):
 
     def __init__(self, task, list):
-        QtGui.QListWidgetItem.__init__(self, '', list)
+        QtWidgets.QListWidgetItem.__init__(self, '', list)
         self.task = task
