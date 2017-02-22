@@ -4,35 +4,46 @@
 import argparse
 import logging
 import sys
+import os
 
-from PyQt5 import QtCore
+from PyQt5 import QtCore, QtGui
 from PyQt5 import QtWidgets
+# import resource for darkstyle
+# taken from https://github.com/ColinDuquesnoy/QDarkStyleSheet
+import qtodotxt.ui.pyqt5_style_rc  # noqa: F401
+import qtodotxt.ui.qTodoTxt_style_rc  # noqa: F401
+import qtodotxt.ui.qTodoTxt_dark_style_rc  # noqa: F401
 
 from qtodotxt.ui.controllers.main_controller import MainController
 from qtodotxt.ui.dialogs.misc_dialogs import Dialogs
-from qtodotxt.ui.dialogs.taskeditor import TaskEditor
-from qtodotxt.ui.resource_manager import getIcon
 from qtodotxt.ui.views.main_view import MainView
+from qtodotxt.lib.file import FileObserver
+from qtodotxt.lib.tendo_singleton import SingleInstance
 
 
 class TrayIcon(QtWidgets.QSystemTrayIcon):
     def __init__(self, main_controller):
         self._controller = main_controller
+        self.style = ":/white_icons"
+        if str(QtCore.QSettings().value("color_schem", "")).find("dark") >= 0:
+            self.style = ":/dark_icons"
         self._initIcon()
 
     def _initIcon(self):
         view = self._controller.getView()
-        icon = getIcon('qtodotxt.png')
+
+        icon = QtGui.QIcon(self.style + "/resources/qtodotxt.png")
         QtWidgets.QSystemTrayIcon.__init__(self, icon, view)
         self.activated.connect(self._onActivated)
         self.setToolTip('QTodoTxt')
 
-        menu = QtWidgets.QMenu()
-        create_task_action = menu.addAction(getIcon('TaskCreate.png'), "Create New Task")
+        menu = QtWidgets.QMenu(self._controller.view)
+        create_task_action = menu.addAction(QtGui.QIcon(self.style + "/resources/TaskCreate.png"),
+                                            self.tr("Create New Task"))
         create_task_action.triggered.connect(self._createTask)
-        toggle_visible_action = menu.addAction("Show/Hide Window")
+        toggle_visible_action = menu.addAction(self.tr("Show/Hide Window"))
         toggle_visible_action.triggered.connect(self._controller.toggleVisible)
-        exit_action = menu.addAction(getIcon('ApplicationExit.png'), "Exit")
+        exit_action = menu.addAction(QtGui.QIcon(self.style + '/resources/ApplicationExit.png'), self.tr("Exit"))
         exit_action.triggered.connect(self._controller.exit)
         self.setContextMenu(menu)
 
@@ -80,8 +91,30 @@ def _setupLogging(loglevel):
 def _createController(args):
     window = MainView()
     dialogs = Dialogs(window, 'QTodoTxt')
-    taskeditor = TaskEditor(window)
-    return MainController(window, dialogs, taskeditor, args)
+    return MainController(window, dialogs, args)
+
+
+def setupAnotherInstanceEvent(controller, dir):
+    fileObserver = FileObserver(controller, dir)
+    fileObserver.addPath(dir)
+    fileObserver.dirChangetSig.connect(controller.anotherInstanceEvent)
+
+
+def setupSingleton(args, me):
+    dir = os.path.dirname(sys.argv[0])
+    tempFileName = dir + "/qtodo.tmp"
+    if me.initialized is True:
+        if os.path.isfile(tempFileName):
+            os.remove(tempFileName)
+    else:
+        f = open(tempFileName, 'w')
+        if args.quickadd is False:
+            f.write("1")
+        if args.quickadd is True:
+            f.write("2")
+        f.flush()
+        f.close()
+        sys.exit(-1)
 
 
 def run():
@@ -90,10 +123,30 @@ def run():
     QtCore.QCoreApplication.setApplicationName("QTodoTxt")
     # Now set up our application and start
     app = QtWidgets.QApplication(sys.argv)
+
+    name = QtCore.QLocale.system().name()
+    translator = QtCore.QTranslator()
+    if translator.load(str(name) + ".qm", "..//i18n"):
+        app.installTranslator(translator)
+
     args = _parseArgs()
+
+    dir = os.path.dirname(sys.argv[0])
+    needSingleton = QtCore.QSettings().value("singleton", 0)
+
+    # clear or write to TMP file, of main instance
+    if int(needSingleton):
+        me = SingleInstance()
+        setupSingleton(args, me)
+
     _setupLogging(args.loglevel)
     #    logger = logging.getLogger(__file__[:-3]) # in case someone wants to log here
     controller = _createController(args)
+
+    # Connecting to a processor reading TMP file
+    if needSingleton:
+        setupAnotherInstanceEvent(controller, dir)
+
     controller.show()
     if int(QtCore.QSettings().value("enable_tray", 0)):
         # If the controller.show() method is not called, the todo.txt file

@@ -1,8 +1,9 @@
 import logging
 import os
 import sys
+import time
 
-from PyQt5 import QtCore
+from PyQt5 import QtCore, QtGui
 from PyQt5 import QtWidgets
 
 from qtodotxt.lib import tasklib
@@ -12,7 +13,6 @@ from qtodotxt.ui.controllers.tasks_list_controller import TasksListController
 from qtodotxt.ui.controllers.filters_tree_controller import FiltersTreeController
 from qtodotxt.lib.filters import SimpleTextFilter, FutureFilter, IncompleteTasksFilter, CompleteTasksFilter
 from qtodotxt.ui.controllers.menu_controller import MenuController
-from qtodotxt.ui.resource_manager import getIcon
 
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,10 @@ FILENAME_FILTERS = ';;'.join([
 
 
 class MainController(QtCore.QObject):
-    def __init__(self, view, dialogs, task_editor_service, args):
+
+    _show_toolbar = QtCore.pyqtSignal(int)
+
+    def __init__(self, view, dialogs, args):
         super(MainController, self).__init__()
         self._args = args
         self.view = view
@@ -31,24 +34,20 @@ class MainController(QtCore.QObject):
         # use object variable for setting only used in this class
         # others are accessed through QSettings
         self._settings = QtCore.QSettings()
-        # self._show_toolbar = int(self._settings.value("show_toolbar", 1))
-        # fix migration issue from old settings
-        show_toolbar = self._settings.value("show_toolbar", 1)
-        if show_toolbar in ("true", "false"):
-            show_toolbar = 1
-        self._show_toolbar = int(show_toolbar)
+
         self._show_completed = True
         self._dialogs = dialogs
-        self._task_editor_service = task_editor_service
-        self._initControllers()
         self._file = File()
         self._fileObserver = FileObserver(self, self._file)
+        self._initControllers()
         self._is_modified = False
         self._setIsModified(False)
+        self._fileObserver.fileChangetSig.connect(self.openFileByName)
         self.view.closeEventSignal.connect(self.view_onCloseEvent)
         filters = self._settings.value("current_filters", ["All"])
         self._filters_tree_controller.view.setSelectedFiltersByNames(filters)
         self.hasTrayIcon = False
+        self._menu_controller.updateRecentFileActions()
 
     def auto_save(self):
         if int(self._settings.value("auto_save", 1)):
@@ -57,9 +56,9 @@ class MainController(QtCore.QObject):
     def _initControllers(self):
         self._initFiltersTree()
         self._initTasksList()
-        self._initMenuBar()
         self._initContextualMenu()
         self._initActions()
+        self._initMenuBar()
         self._initToolBar()
         self._initSearchText()
 
@@ -68,24 +67,39 @@ class MainController(QtCore.QObject):
         self._menu_controller = MenuController(self, menu)
 
     def _initActions(self):
-        self.filterViewAction = QtWidgets.QAction(getIcon('sidepane.png'), '&Show Filters', self)
+        self.filterViewAction = QtWidgets.QAction(QtGui.QIcon(self.view.style + '/resources/sidepane.png'),
+                                                  self.tr('Show &Filters'), self)
         self.filterViewAction.setCheckable(True)
-        # action.setShortcuts(['Ctrl+E']) # what should it be?
+        self.filterViewAction.setShortcuts(['Ctrl+Shift+F'])
         self.filterViewAction.triggered.connect(self._toggleFilterView)
 
-        self.showFutureAction = QtWidgets.QAction(getIcon('future.png'), '&Show Future Tasks', self)
+        self.showFutureAction = QtWidgets.QAction(QtGui.QIcon(self.view.style + '/resources/future.png'),
+                                                  self.tr('Show future &Tasks'), self)
         self.showFutureAction.setCheckable(True)
-        # action.setShortcuts(['Ctrl+E']) # what should it be?
+        self.showFutureAction.setShortcuts(['Ctrl+Shift+T'])
         self.showFutureAction.triggered.connect(self._toggleShowFuture)
 
-        self.showCompletedAction = QtWidgets.QAction(getIcon('show_completed.png'), '&Show Completed Tasks', self)
+        self.showCompletedAction = QtWidgets.QAction(QtGui.QIcon(self.view.style + '/resources/show_completed.png'),
+                                                     self.tr('Show &Completed tasks'), self)
         self.showCompletedAction.setCheckable(True)
-        # action.setShortcuts(['Ctrl+E']) # what should it be?
+        self.showCompletedAction.setShortcuts(['Ctrl+Shift+C'])
         self.showCompletedAction.triggered.connect(self._toggleShowCompleted)
 
-        self.archiveAction = QtWidgets.QAction(getIcon('archive.png'), '&Archive Completed Tasks', self)
-        # action.setShortcuts(['Ctrl+E']) # what should it be?
+        self.archiveAction = QtWidgets.QAction(QtGui.QIcon(self.view.style + '/resources/archive.png'),
+                                               self.tr('&Archive completed tasks'), self)
+        self.archiveAction.setShortcuts(['Ctrl+Shift+A'])
         self.archiveAction.triggered.connect(self._archive_all_done_tasks)
+
+        self.showToolBarAction = QtWidgets.QAction(self.tr('Show tool&Bar'), self)
+        self.showToolBarAction.setCheckable(True)
+        self.showToolBarAction.setShortcuts(['Ctrl+Shift+B'])
+        self.showToolBarAction.triggered.connect(self._toggleShowToolBar)
+
+        self.showSearchAction = QtWidgets.QAction(QtGui.QIcon(self.view.style + '/resources/ActionSearch.png'),
+                                                  self.tr('Show search bar'), self)
+        self.showSearchAction.setCheckable(True)
+        self.showSearchAction.setShortcuts(['Ctrl+F'])
+        self.showSearchAction.triggered.connect(self._toggleShowSearch)
 
     def _initToolBar(self):
         toolbar = self.view.addToolBar("Main Toolbar")
@@ -94,6 +108,7 @@ class MainController(QtCore.QObject):
         toolbar.addAction(self.filterViewAction)
         toolbar.addAction(self.showFutureAction)
         toolbar.addAction(self.showCompletedAction)
+        toolbar.addAction(self.showSearchAction)
 
         toolbar.addSeparator()
 
@@ -101,6 +116,7 @@ class MainController(QtCore.QObject):
         toolbar.addAction(self._menu_controller.saveAction)
         toolbar.addSeparator()
         toolbar.addAction(self._tasks_list_controller.createTaskAction)
+        toolbar.addAction(self._tasks_list_controller.createTaskActionOnTemplate)
         toolbar.addAction(self._tasks_list_controller.editTaskAction)
         toolbar.addAction(self._tasks_list_controller.copySelectedTasksAction)
         toolbar.addSeparator()
@@ -112,9 +128,28 @@ class MainController(QtCore.QObject):
         toolbar.addAction(self._tasks_list_controller.decreasePrioritySelectedTasksAction)
         toolbar.addSeparator()
         toolbar.addAction(self.archiveAction)
-        toolbar.visibilityChanged.connect(self._toolbar_visibility_changed)
-        if not self._show_toolbar:
-            toolbar.hide()
+
+        toolbar.addSeparator()
+        toolbar.addAction(self._tasks_list_controller.addLinkAction)
+
+        self._show_toolbar.connect(toolbar.setVisible)
+
+    def _toggleShowToolBar(self):
+        if self.showToolBarAction.isChecked():
+            self._settings.setValue("show_toolbar", 1)
+            self._toolbar_visibility_changed(1)
+        else:
+            self._settings.setValue("show_toolbar", 0)
+            self._toolbar_visibility_changed(0)
+
+    def _toggleShowSearch(self):
+        if self.showSearchAction.isChecked():
+            self._settings.setValue("show_search", 1)
+            self.view.tasks_view.tasks_search_view.setVisible(True)
+        else:
+            self._settings.setValue("show_search", 0)
+            self.view.tasks_view.tasks_search_view.setVisible(False)
+            self.view.tasks_view.tasks_search_view.setText("")
 
     def _toggleShowCompleted(self):
         if self.showCompletedAction.isChecked():
@@ -163,7 +198,7 @@ class MainController(QtCore.QObject):
             self._toggleFilterView()
 
     def _toolbar_visibility_changed(self, val):
-        self._show_toolbar = int(val)
+        self._show_toolbar.emit(val)
 
     def exit(self):
         self.view.close()
@@ -228,7 +263,7 @@ class MainController(QtCore.QObject):
 
     def _initTasksList(self):
         controller = self._tasks_list_controller = \
-            TasksListController(self.view.tasks_view.tasks_list_view, self._task_editor_service)
+            TasksListController(self.view.tasks_view.tasks_list_view, self._file)
 
         controller.taskCreated.connect(self._tasks_list_taskCreated)
         controller.taskModified.connect(self._tasks_list_taskModified)
@@ -241,13 +276,15 @@ class MainController(QtCore.QObject):
         # controller.view.setContextMenuPolicy(QtCore.Qt.ActionsContextMenu)
         self._tasks_list_controller.view.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self._tasks_list_controller.view.customContextMenuRequested.connect(self.showContextMenu)
-        self._contextMenu = QtWidgets.QMenu()
+        self._contextMenu = QtWidgets.QMenu(self.view)
         self._contextMenu.addAction(self._tasks_list_controller.createTaskAction)
+        self._contextMenu.addAction(self._tasks_list_controller.createTaskActionOnTemplate)
         self._contextMenu.addAction(self._tasks_list_controller.editTaskAction)
         self._contextMenu.addAction(self._tasks_list_controller.copySelectedTasksAction)
+        self._contextMenu.addAction(self._tasks_list_controller.addLinkAction)
         self._contextMenu.addSeparator()
         self._contextMenu.addAction(self._tasks_list_controller.completeSelectedTasksAction)
-        if int(self._settings.value("show_delete", 0)):
+        if int(self._settings.value("show_delete", 1)):
             self._contextMenu.addAction(self._tasks_list_controller.deleteSelectedTasksAction)
         self._contextMenu.addSeparator()
         self._contextMenu.addAction(self._tasks_list_controller.increasePrioritySelectedTasksAction)
@@ -266,7 +303,7 @@ class MainController(QtCore.QObject):
         self._file.tasks.append(task)
         self._onFileUpdated()
 
-    def _tasks_list_taskModified(self, task):
+    def _tasks_list_taskModified(self):
         self._onFileUpdated()
 
     def _tasks_list_taskArchived(self, task):
@@ -283,14 +320,13 @@ class MainController(QtCore.QObject):
 
     def _onFileUpdated(self):
         self._filters_tree_controller.showFilters(self._file, self._show_completed)
-        self._task_editor_service.updateValues(self._file)
         self._setIsModified(True)
         self.auto_save()
 
     def _canExit(self):
         if not self._is_modified:
             return True
-        button = self._dialogs.showSaveDiscardCancel('Unsaved changes...')
+        button = self._dialogs.showSaveDiscardCancel(self.tr('Unsaved changes...'))
         if button == QtWidgets.QMessageBox.Save:
             self.save()
             return True
@@ -305,7 +341,6 @@ class MainController(QtCore.QObject):
             return
 
         if self._canExit():
-            self._settings.setValue("show_toolbar", self._show_toolbar)
             if self.filterViewAction.isChecked():  # we only save size if it is visible
                 self._settings.setValue("splitter_pos", self.view.centralWidget().sizes())
             self._settings.setValue("current_filters", self._filters_tree_controller.view.getSelectedFilterNames())
@@ -365,7 +400,7 @@ class MainController(QtCore.QObject):
             self._loadFileToUI()
 
     def revert(self):
-        if self._dialogs.showConfirm('Revert to saved file (and lose unsaved changes)?'):
+        if self._dialogs.showConfirm(self.tr('Revert to saved file (and lose unsaved changes)?')):
             try:
                 self.openFileByName(self._file.filename)
             except ErrorLoadingFile as ex:
@@ -374,17 +409,35 @@ class MainController(QtCore.QObject):
     def openFileByName(self, filename):
         logger.debug('MainController.openFileByName called with filename="{}"'.format(filename))
         self._fileObserver.clear()
-        self._file.load(filename)
+        try:
+            self._file.load(filename)
+        except Exception as ex:
+            currentfile = self._settings.value("last_open_file", "")
+            if currentfile == filename:
+                self._dialogs.showError(self.tr("Current file '{}' is not available.\nException: {}").
+                                        format(filename, ex))
+            else:
+                self._dialogs.showError(self.tr("Error opening file: {}.\n Exception:{}").format(filename, ex))
+            return
         self._loadFileToUI()
         self._settings.setValue("last_open_file", filename)
         self._settings.sync()
         logger.debug('Adding {} to watchlist'.format(filename))
         self._fileObserver.addPath(self._file.filename)
+        self.updateRecentFile()
+
+    def updateRecentFile(self):
+        lastOpenedArray = self._menu_controller.getRecentFileNames()
+        if self._file.filename in lastOpenedArray:
+            lastOpenedArray.remove(self._file.filename)
+        lastOpenedArray = lastOpenedArray[:self._menu_controller.maxRecentFiles]
+        lastOpenedArray.insert(0, self._file.filename)
+        self._settings.setValue("lastOpened", lastOpenedArray[: self._menu_controller.maxRecentFiles])
+        self._menu_controller.updateRecentFileActions()
 
     def _loadFileToUI(self):
         self._setIsModified(False)
         self._filters_tree_controller.showFilters(self._file, self._show_completed)
-        self._task_editor_service.updateValues(self._file)
 
     def _updateView(self):
         wgeo = self._settings.value("main_window_geometry", None)
@@ -399,6 +452,8 @@ class MainController(QtCore.QObject):
         self._restoreShowCompleted()
         self._restoreFilterView()
         self._restoreShowFuture()
+        self._restoreShowToolBar()
+        self._restoreShowSearch()
 
     def _restoreShowCompleted(self):
         val = int(self._settings.value("show_completed_tasks", 1))
@@ -409,6 +464,24 @@ class MainController(QtCore.QObject):
             self._show_completed = False
             self.showCompletedAction.setChecked(False)
 
+    def _restoreShowToolBar(self):
+        val = int(self._settings.value("show_toolbar", 1))
+        if val:
+            self._toolbar_visibility_changed(1)
+            self.showToolBarAction.setChecked(True)
+        else:
+            self._toolbar_visibility_changed(0)
+            self.showToolBarAction.setChecked(False)
+
+    def _restoreShowSearch(self):
+        val = int(self._settings.value("show_search", 1))
+        if val:
+            self.view.tasks_view.tasks_search_view.setVisible(True)
+            self.showSearchAction.setChecked(True)
+        else:
+            self.view.tasks_view.tasks_search_view.setVisible(False)
+            self.showSearchAction.setChecked(False)
+
     def updateFilters(self):
         self._onFilterSelectionChanged(self._filters_tree_controller.view.getSelectedFilters())
 
@@ -418,3 +491,22 @@ class MainController(QtCore.QObject):
             self.view.activateWindow()
         else:
             self.view.hide()
+
+    def anotherInstanceEvent(self, dir):
+        tFile = dir + "/qtodo.tmp"
+        if not os.path.isfile(tFile):
+            return
+        time.sleep(0.01)
+        f = open(tFile, 'r+b')
+        line = f.readline()
+        line = line.strip()
+        if line == b"1":
+            self.view.show()
+            self.view.activateWindow()
+        if line == b"2":
+            self.view.show()
+            self.view.activateWindow()
+            self._tasks_list_controller.createTask()
+
+        f.close()
+        os.remove(tFile)

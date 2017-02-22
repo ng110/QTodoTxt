@@ -1,9 +1,8 @@
-from PyQt5 import QtCore
+from PyQt5 import QtCore, QtGui
 from PyQt5 import QtWidgets
 from qtodotxt.lib.filters import ContextFilter, CompleteTasksFilter, DueFilter, DueOverdueFilter, DueThisMonthFilter, \
     DueThisWeekFilter, DueTodayFilter, DueTomorrowFilter, HasContextsFilter, HasDueDateFilter, HasProjectsFilter, \
-    ProjectFilter, UncategorizedTasksFilter, AllTasksFilter
-from qtodotxt.ui.resource_manager import getIcon
+    ProjectFilter, UncategorizedTasksFilter, AllTasksFilter, PriorityFilter
 
 
 class FiltersTreeView(QtWidgets.QWidget):
@@ -12,6 +11,9 @@ class FiltersTreeView(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super(FiltersTreeView, self).__init__(parent)
+        self.style = ":/white_icons"
+        if str(QtCore.QSettings().value("color_schem", "")).find("dark") >= 0:
+            self.style = ":/dark_icons"
         self._filterItemByFilterType = dict()
         self._filterIconByFilterType = dict()
         self._treeItemByFilterType = dict()
@@ -74,6 +76,8 @@ class FiltersTreeView(QtWidgets.QWidget):
         nbProjCompl = counters['ProjCompl']
         nbDueCompl = counters['DueCompl']
         nbUncatCompl = counters['UncatCompl']
+        nbPriority = counters['Priority']
+        nbPrioCompl = counters['PrioCompl']
 
         self._completeTasksItem.setText(0, "Complete (%d)" % nbComplete)
         if (show_completed is True):
@@ -81,12 +85,14 @@ class FiltersTreeView(QtWidgets.QWidget):
             self._dueItem.setText(0, "Due ({0}; {1})".format(nbDue, nbDueCompl))
             self._contextsItem.setText(0, "Contexts ({0}; {1})".format(nbContexts, nbContCompl))
             self._projectsItem.setText(0, "Projects ({0}; {1})".format(nbProjects, nbProjCompl))
+            self._priorityItem.setText(0, "Priority ({0}; {1})".format(nbPriority, nbPrioCompl))
             self._uncategorizedTasksItem.setText(0, "Uncategorized ({0}; {1})".format(nbUncategorized, nbUncatCompl))
         else:
             self._allTasksItem.setText(0, "All (%d)" % nbPending)
             self._contextsItem.setText(0, "Contexts (%d)" % nbContexts)
             self._projectsItem.setText(0, "Projects (%d)" % nbProjects)
             self._dueItem.setText(0, "Due (%d)" % nbDue)
+            self._priorityItem.setText(0, "Priority (%d)" % nbPriority)
             self._uncategorizedTasksItem.setText(0, "Uncategorized (%d)" % nbUncategorized)
 
     def selectAllTasksFilter(self):
@@ -109,6 +115,10 @@ class FiltersTreeView(QtWidgets.QWidget):
         item = self._findItem(due, self._dueItem)
         self._selectItem(item)
 
+    def _selectPriority(self, priority):
+        item = self._findItem(priority, self._priorityItem)
+        self._selectItem(item)
+
     def _findItem(self, text, parentItem):
         for index in range(parentItem.childCount()):
             child = parentItem.child(index)
@@ -122,8 +132,7 @@ class FiltersTreeView(QtWidgets.QWidget):
         layout = QtWidgets.QGridLayout()
         self.setLayout(layout)
         offset = QtCore.QSettings().value("ui_margin_offset", -4)
-        self.setContentsMargins(offset, offset,
-                                2 * offset, offset)
+        self.setContentsMargins(offset, offset, 2 * offset, offset)
         self._tree = self._createTreeWidget()
         layout.addWidget(self._tree)
 
@@ -137,37 +146,29 @@ class FiltersTreeView(QtWidgets.QWidget):
         return tree
 
     def _addDefaultTreeItems(self, tree):
-        self._allTasksItem = FilterTreeWidgetItem(None,
-                                                  ['All'],
+        self._allTasksItem = FilterTreeWidgetItem(None, ['All'],
                                                   AllTasksFilter(),
-                                                  getIcon('FilterAll.png'))
-        self._dueItem = FilterTreeWidgetItem(None,
-                                             ['Due'],
-                                             HasDueDateFilter(),
-                                             getIcon('FilterDue.png'))
-        self._uncategorizedTasksItem = FilterTreeWidgetItem(None,
-                                                            ['Uncategorized'],
-                                                            UncategorizedTasksFilter(),
-                                                            getIcon('FilterUncategorized.png'))
-        self._contextsItem = FilterTreeWidgetItem(None,
-                                                  ['Contexts'],
+                                                  QtGui.QIcon(self.style + '/resources/FilterAll.png'))
+        self._dueItem = FilterTreeWidgetItem(None, ['Due'],
+                                             HasDueDateFilter(), QtGui.QIcon(self.style + '/resources/FilterDue.png'))
+        self._uncategorizedTasksItem = FilterTreeWidgetItem(
+            None, ['Uncategorized'],
+            UncategorizedTasksFilter(), QtGui.QIcon(self.style + '/resources/FilterUncategorized.png'))
+        self._contextsItem = FilterTreeWidgetItem(None, ['Contexts'],
                                                   HasContextsFilter(),
-                                                  getIcon('FilterContexts.png'))
-        self._projectsItem = FilterTreeWidgetItem(None,
-                                                  ['Projects'],
+                                                  QtGui.QIcon(self.style + '/resources/FilterContexts.png'))
+        self._projectsItem = FilterTreeWidgetItem(None, ['Projects'],
                                                   HasProjectsFilter(),
-                                                  getIcon('FilterProjects.png'))
-        self._completeTasksItem = FilterTreeWidgetItem(None,
-                                                       ['Complete'],
+                                                  QtGui.QIcon(self.style + '/resources/FilterProjects.png'))
+        self._priorityItem = FilterTreeWidgetItem(None, ['Priorities'],
+                                                  PriorityFilter(),
+                                                  QtGui.QIcon(self.style + '/resources/FilterComplete.png'))
+        self._completeTasksItem = FilterTreeWidgetItem(None, ['Complete'],
                                                        CompleteTasksFilter(),
-                                                       getIcon('FilterComplete.png'))
+                                                       QtGui.QIcon(self.style + '/resources/FilterComplete.png'))
         tree.addTopLevelItems([
-            self._allTasksItem,
-            self._uncategorizedTasksItem,
-            self._dueItem,
-            self._contextsItem,
-            self._projectsItem,
-            self._completeTasksItem
+            self._allTasksItem, self._uncategorizedTasksItem, self._dueItem, self._contextsItem, self._projectsItem,
+            self._priorityItem, self._completeTasksItem
         ])
 
     def _initFilterTypeMappings(self):
@@ -175,14 +176,14 @@ class FiltersTreeView(QtWidgets.QWidget):
         self._filterItemByFilterType[ProjectFilter] = self._projectsItem
         self._filterItemByFilterType[DueFilter] = self._dueItem
 
-        self._filterIconByFilterType[ContextFilter] = getIcon('FilterContexts.png')
-        self._filterIconByFilterType[ProjectFilter] = getIcon('FilterProjects.png')
+        self._filterIconByFilterType[ContextFilter] = QtGui.QIcon(self.style + '/resources/FilterContexts.png')
+        self._filterIconByFilterType[ProjectFilter] = QtGui.QIcon(self.style + '/resources/FilterProjects.png')
 
-        self._filterIconByFilterType[DueTodayFilter] = getIcon('FilterDueToday.png')
-        self._filterIconByFilterType[DueTomorrowFilter] = getIcon('FilterDueTomorrow.png')
-        self._filterIconByFilterType[DueThisWeekFilter] = getIcon('FilterDueWeek.png')
-        self._filterIconByFilterType[DueThisMonthFilter] = getIcon('FilterDueMonth.png')
-        self._filterIconByFilterType[DueOverdueFilter] = getIcon('FilterDueOverdue.png')
+        self._filterIconByFilterType[DueTodayFilter] = QtGui.QIcon(self.style + '/resources/FilterDueToday.png')
+        self._filterIconByFilterType[DueTomorrowFilter] = QtGui.QIcon(self.style + '/resources/FilterDueTomorrow.png')
+        self._filterIconByFilterType[DueThisWeekFilter] = QtGui.QIcon(self.style + '/resources/FilterDueWeek.png')
+        self._filterIconByFilterType[DueThisMonthFilter] = QtGui.QIcon(self.style + '/resources/FilterDueMonth.png')
+        self._filterIconByFilterType[DueOverdueFilter] = QtGui.QIcon(self.style + '/resources/FilterDueOverdue.png')
 
         self._treeItemByFilterType[AllTasksFilter] = self._allTasksItem
         self._treeItemByFilterType[UncategorizedTasksFilter] = self._uncategorizedTasksItem
@@ -190,6 +191,7 @@ class FiltersTreeView(QtWidgets.QWidget):
         self._treeItemByFilterType[HasProjectsFilter] = self._projectsItem
         self._treeItemByFilterType[HasDueDateFilter] = self._dueItem
         self._treeItemByFilterType[HasContextsFilter] = self._contextsItem
+        self._treeItemByFilterType[PriorityFilter] = self._priorityItem
 
     def _tree_itemSelectionChanged(self):
         self.filterSelectionChanged.emit(self.getSelectedFilters())
@@ -211,6 +213,8 @@ class FiltersTreeView(QtWidgets.QWidget):
             self._selectDueRange(filter.text)
         elif isinstance(filter, DueOverdueFilter):
             self._selectDueRange(filter.text)
+        elif isinstance(filter, PriorityFilter):
+            self._selectPriority(filter.text)
         else:
             item = self._treeItemByFilterType[type(filter)]
             self._selectItem(item)

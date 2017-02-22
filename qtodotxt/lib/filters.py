@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 
 class BaseFilter(object):
@@ -7,6 +7,7 @@ class BaseFilter(object):
     The abstract base class for different kind of task-list filters.
 
     """
+
     def __init__(self, text):
         """
         Initialize a new BaseFilter objects.
@@ -19,6 +20,7 @@ class BaseFilter(object):
 
     def __str__(self):
         return "Filter:{}".format(self.__class__.__name__)
+
     __repr__ = __str__
 
     def isMatch(self, task):
@@ -47,6 +49,7 @@ class AllTasksFilter(BaseFilter):
     Task list filter that returns all tasks.
 
     """
+
     def __init__(self):
         BaseFilter.__init__(self, 'All')
 
@@ -56,6 +59,7 @@ class IncompleteTasksFilter(BaseFilter):
     Task list filter that removes any completed tasks.
 
     """
+
     def __init__(self):
         BaseFilter.__init__(self, 'Incomplete')
 
@@ -68,6 +72,7 @@ class UncategorizedTasksFilter(BaseFilter):
     Task list filter permitting incomplete tasks without project or context.
 
     """
+
     def __init__(self):
         BaseFilter.__init__(self, 'Uncategorized')
 
@@ -80,6 +85,7 @@ class CompleteTasksFilter(BaseFilter):
     Task list filter that removes any uncompleted tasks from the list.
 
     """
+
     def __init__(self):
         BaseFilter.__init__(self, 'Complete')
 
@@ -108,6 +114,7 @@ class ProjectFilter(BaseFilter):
     Task list filter allowing only incomplete tasks with the selected project.
 
     """
+
     def __init__(self, project):
         BaseFilter.__init__(self, project)
 
@@ -123,6 +130,7 @@ class DueFilter(BaseFilter):
     Due list filter for ranges
 
     """
+
     def __init__(self, dueRange):
         BaseFilter.__init__(self, dueRange)
 
@@ -138,6 +146,7 @@ class DueTodayFilter(BaseFilter):
     Task list filter allowing only incomplete tasks that are due today.
 
     """
+
     def __init__(self, dueRange):
         BaseFilter.__init__(self, dueRange)
 
@@ -146,7 +155,7 @@ class DueTodayFilter(BaseFilter):
             return False
         else:
             self.due_date = task.due
-            today = datetime.today().date()
+            today = datetime.combine(date.today(), datetime.min.time())
             return self.due_date == today
 
     def __str__(self):
@@ -158,6 +167,7 @@ class DueTomorrowFilter(BaseFilter):
     Task list filter allowing only incomplete tasks that are due tomorrow.
 
     """
+
     def __init__(self, dueRange):
         BaseFilter.__init__(self, dueRange)
 
@@ -166,7 +176,7 @@ class DueTomorrowFilter(BaseFilter):
             return False
         else:
             due_date = task.due
-            today = datetime.today().date()
+            today = datetime.combine(date.today(), datetime.min.time())
             return today < due_date <= today + timedelta(days=1)
 
     def __str__(self):
@@ -178,6 +188,7 @@ class DueThisWeekFilter(BaseFilter):
     Task list filter allowing only incomplete tasks that are due this week.
 
     """
+
     def __init__(self, dueRange):
         BaseFilter.__init__(self, dueRange)
 
@@ -186,7 +197,7 @@ class DueThisWeekFilter(BaseFilter):
             return False
         else:
             due_date = task.due
-            today = datetime.today().date()
+            today = datetime.combine(date.today(), datetime.min.time())
             return today <= due_date <= today + timedelta((6 - today.weekday()) % 7)
 
     def __str__(self):
@@ -198,6 +209,7 @@ class DueThisMonthFilter(BaseFilter):
     Task list filter allowing only incomplete tasks that are due this month.
 
     """
+
     def __init__(self, dueRange):
         BaseFilter.__init__(self, dueRange)
 
@@ -206,7 +218,7 @@ class DueThisMonthFilter(BaseFilter):
             return False
         else:
             due_date = task.due
-            today = datetime.today().date()
+            today = datetime.combine(date.today(), datetime.min.time())
             if today.month == 12:
                 last_day_of_month = today.replace(day=31)
             else:
@@ -222,6 +234,7 @@ class DueOverdueFilter(BaseFilter):
     Task list filter allowing only incomplete tasks that are overdue.
 
     """
+
     def __init__(self, dueRange):
         BaseFilter.__init__(self, dueRange)
 
@@ -229,12 +242,9 @@ class DueOverdueFilter(BaseFilter):
         if not task.due:
             return False
         else:
-            if not task.due:
-                return False
-            else:
-                due_date = task.due
-                today = datetime.today().date()
-                return due_date < today
+            due_date = task.due
+            today = datetime.combine(date.today(), datetime.min.time())
+            return due_date < today
 
     def __str__(self):
         return "DueOverdueFilter(%s)" % self.text
@@ -304,91 +314,111 @@ class HasDueRangesFilter(BaseFilter):
         return "HasDueRangesFilter" % self.text
 
 
-def simpleTextFilterRepl(matchObj):
-    """
-    Return a search string based on the matchObj
-
-    Replace function used in SimpleTextFilter isMatch, needed to allow for inverted(not) searching
-
-    """
-    if(matchObj.group(1)):
-        return "^(?!.*" + matchObj.group(2) + ")"
-    else:
-        return "^(?=.*" + matchObj.group(2) + ")"
-
-
 class SimpleTextFilter(BaseFilter):
-    """
+
+    r"""
     Task list filter allowing only tasks whose string matches a filter string.
 
     This filter allows for basic and/or/not conditions in the filter string.
     For the syntax see SimpleTextFilter.isMatch.
 
+    User documentation:
+
+    This filter can handle basic and/or/not conditions. The syntax is as
+    follows:
+
+    :AND   :   ',' or whitespace (' ')
+    :OR    :   '|'
+    :NOT   :   prefixed '~' or '!'
+
+    These operators follow the following order of precedence: OR, AND, NOT.
+    So, for example:
+
+    :'work job1 | @home':                Either  (matches 'work'
+                                                 AND 'job1')
+                                        OR      (matches '@home')
+
+    :'norweigan blue ~dead | !parrot':  Either  (matches 'norweigan'
+                                                 AND 'blue'
+                                                 AND does NOT match 'dead')
+                                        OR      (does NOT match 'parrot')
+
+    Terms match the beginning of words, so:
+
+    - 'cleese' Does NOT match 'johncleese'
+
+    Since the python re module is used, most of the escaped regex
+    characters will also work when attached to one of the (comma- or space-
+    delimited) strings. E.g.:
+
+    - john\b will match 'john' but not 'johncleese'
+    - 2014-\d\d-07 will match '2014-03-07' but not '2014-ja-07'
+
+    - '(B)' will match '(B) nail its feet to the perch'.
     """
 
     def __init__(self, text):
         BaseFilter.__init__(self, text)
+        self.re = SimpleTextFilter.compile(text)
+
+    # Terms are split by "," " " or "|".  Retain only a "|" for the re.
+    _splitter = re.compile(r'\s*(\|)\s*|[,\s]+()', re.U)
+    # Escape anything that's not alphanumeric or a backslash
+    _escaper = re.compile(r'(\\\Z|[^\w\\])', re.U)
+    # Characters that negate a term
+    _negates = ('!', '~')
+
+    @staticmethod
+    def _term2re(term):
+        # Don't translate separators
+        if term is None or term == '|' or term == '':
+            return term or ''
+
+        # Check for negated  term
+        negate = term.startswith(SimpleTextFilter._negates)
+        if negate:
+            term = term[1:]
+
+        # If the term is a word (starts with alpha), then only match beginnings of words
+        beginning = r'\b' if re.match(r'\b', term) else r'\B'
+
+        # Ignore special meaning of characters like "*", "+", "(", "[", etc.
+        term = SimpleTextFilter._escaper.sub(r'\\\1', term)
+
+        # Return a pattern that will match the beginning of a word or not,
+        # anywhere in the string, without consuming any of the string.
+        return r'^(?' + ('!' if negate else '=') + r'.*' + beginning + term + r')'
+
+    @staticmethod
+    def compile(searchString):
+        r"""
+        Return the user's searchString compiled to a regular expression.
+
+        Example terms: @call +work (A) carrots
+        Term may be prefixed with ! or ~ for negation.
+        Terms may be combined with "," or " " (AND) or with "|" (OR).
+        Terms only match the beginning of a word in the task.
+        Terms are case-insensitive.
+        Expressions may NOT be nested with parentheses.
+        Only \-character special regular expression sets are allowed, everything else is escaped.
+        """
+        if not searchString:
+            return None
+
+        terms = SimpleTextFilter._splitter.split(searchString)
+        terms = [SimpleTextFilter._term2re(term) for term in terms]
+
+        return re.compile("".join(terms), re.I | re.U)
 
     def isMatch(self, task):
-        """
-        Return a boolean based on whether the supplied task satisfies self.text.
-
-        This filter can handle basic and/or/not conditions. The syntax is as
-        follows:
-
-        :AND   :   ',' or whitespace (' ')
-        :OR    :   '|'
-        :NOT   :   prefixed '~' or '!'
-
-        These operators follow the following order of precedence: OR, AND, NOT.
-        So, for example:
-
-        :'work job1 | home':                Either  (matches 'work'
-                                                     AND 'job1')
-                                            OR      (matches 'home')
-
-        :'norweigan blue ~dead | !parrot':  Either  (matches 'norweigan'
-                                                     AND 'blue'
-                                                     AND does NOT match 'dead')
-                                            OR      (does NOT match 'parrot')
-
-        Since the python re module is used, most of the escaped regex
-        characters will also work when attached to one of the (comma- or space-
-        delimited) strings. E.g.:
-        - \bcleese\b will match 'cleese' but not 'johncleese'
-        - 2014-\d\d-07 will match '2014-03-07' but not '2014-ja-07'
-
-        The method can handle parentheses in the search strings. Unlike most
-        regex characters, these don't need to be escaped since they are escaped
-        automatically. So the search string '(B)' will match '(B) nail its
-        feet to the perch'.
-        """
-        mymatch = False
-        comp = re.compile(r'\s*([\!~])?([\(\)\w\\\-]+)[\s,]*', re.U)
-        restring = comp.sub(simpleTextFilterRepl, self.text, re.U)
-        try:
-            if ')' in restring:
-                raise re.error('')  # otherwise adding closing parenth avoids error here
-            mymatch = re.search(restring, task.text, re.I | re.U)
-        except re.error:
-            comp2 = re.compile(r'\s*\((?=[^?])', re.U)
-            restring2 = comp2.sub(r'\\(', restring, re.U)
-            comp3 = re.compile(r'(?<!\))\)(?=\))', re.U)
-            restring3 = comp3.sub(r'\\)', restring2, re.U)
-            """temporary solution: user input illegal characters in the
-            search string (+,?,\) otherwise the program crashed"""
-            try:
-                mymatch = re.search(restring3, task.text, re.I | re.U)
-            except Exception:
-                mymatch = True
-        return mymatch
+        """ Return a boolean based on whether the supplied task satisfies self.text. """
+        return self.re.match(task.text) if self.re else True
 
     def __str__(self):
         return "SimpleTextFilter({})".format(self.text)
 
 
 class FutureFilter(BaseFilter):
-
     def __init__(self):
         BaseFilter.__init__(self, 'Future')
 
@@ -397,3 +427,19 @@ class FutureFilter(BaseFilter):
 
     def __str__(self):
         return "FutureFilter " % self.text
+
+
+class PriorityFilter(BaseFilter):
+    """
+    Task list filter that removes any completed tasks.
+
+    """
+
+    def __init__(self):
+        BaseFilter.__init__(self, 'Priority')
+
+    def isMatch(self, task):
+        return task.priority != ""
+
+    def __str__(self):
+        return "PriorityFilter " % self.text

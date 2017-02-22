@@ -4,13 +4,13 @@ import sys
 
 
 setup(name="qtodotxt", 
-      version="1.6.2",
+      version="1.7.0",
       description="Cross Platform todo.txt GUI",
       author="QTT Development Team",
       author_email="qtodotxt@googlegroups.com",
       url='https://github.com/QTodoTxt/QTodoTxt',
       packages=find_packages(include=("*.png")) + ["qtodotxt.ui.resources", "qtodotxt.ui.resources.css"],
-      package_data={"": ["*.png", "*.svg", "*.css"]},
+      package_data={"": ["*.png", "*.svg", "*.css", "*.ico"]},
       provides=["qtodotxt"],
       depends=["python-dateutil"],
       license="GNU General Public License v3 or later",

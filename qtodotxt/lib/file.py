@@ -182,10 +182,12 @@ class File(object):
                          'Contexts': 0,
                          'Projects': 0,
                          'Complete': 0,
+                         'Priority': 0,
                          'DueCompl': 0,
                          'ProjCompl': 0,
                          'ContCompl': 0,
                          'UncatCompl': 0,
+                         'PrioCompl': 0,
                          'Due': 0})
         for task in self.tasks:
             nbProjects = len(task.projects)
@@ -200,6 +202,8 @@ class File(object):
                     counters['Uncategorized'] += 1
                 if task.due:
                     counters['Due'] += 1
+                if task.priority != "":
+                    counters['Priority'] += 1
             else:
                 counters['Complete'] += 1
                 if nbProjects > 0:
@@ -210,15 +214,22 @@ class File(object):
                     counters['UncatCompl'] += 1
                 if task.due:
                     counters['DueCompl'] += 1
+                if task.priority != "":
+                    counters['PrioCompl'] += 1
         return counters
 
 
 class FileObserver(QtCore.QFileSystemWatcher):
+
+    fileChangetSig = QtCore.pyqtSignal(str)
+    dirChangetSig = QtCore.pyqtSignal(str)
+
     def __init__(self, parent, file):
         logger.debug('Setting up FileObserver instance.')
         super().__init__(parent)
         self._file = file
         self.fileChanged.connect(self.fileChangedHandler)
+        self.directoryChanged.connect(self.dirChangedHandler)
 
     @QtCore.pyqtSlot(str)
     def fileChangedHandler(self, path):
@@ -229,13 +240,17 @@ class FileObserver(QtCore.QFileSystemWatcher):
             max_time = time.time() + 1
             while time.time() < max_time:
                 try:
-                    self.parent().openFileByName(self._file.filename)  # TODO make that emit a signal
+                    self.fileChangetSig.emit(path)
                 except ErrorLoadingFile:
                     time.sleep(0.01)
                     debug_counter += 1
                 else:
                     logger.debug('It took {} additional attempts until the file could be read.'.format(debug_counter))
                     break
+
+    @QtCore.pyqtSlot(str)
+    def dirChangedHandler(self, path):
+        self.dirChangetSig.emit(path)
 
     def clear(self):
         if self.files():
