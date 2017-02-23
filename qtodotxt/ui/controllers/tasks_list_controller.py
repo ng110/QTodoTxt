@@ -350,7 +350,8 @@ class TasksListController(QtCore.QObject):
         self.editTaskAction.setEnabled(True)
         self.addLinkAction.setEnabled(True)
         self.createTaskActionOnTemplate.setEnabled(True)
-        self.deleteSelectedTasksAction.setEnabled(True)
+        if int(QtCore.QSettings().value("show_delete", 1)):
+            self.deleteSelectedTasksAction.setEnabled(True)
         self.completeSelectedTasksAction.setEnabled(True)
         self.copySelectedTasksAction.setEnabled(True)
         self.increasePrioritySelectedTasksAction.setEnabled(True)
@@ -360,7 +361,8 @@ class TasksListController(QtCore.QObject):
         self.editTaskAction.setEnabled(False)
         self.addLinkAction.setEnabled(False)
         self.createTaskActionOnTemplate.setEnabled(False)
-        self.deleteSelectedTasksAction.setEnabled(False)
+        if int(QtCore.QSettings().value("show_delete", 1)):
+            self.deleteSelectedTasksAction.setEnabled(False)
         self.completeSelectedTasksAction.setEnabled(False)
         self.copySelectedTasksAction.setEnabled(False)
         self.increasePrioritySelectedTasksAction.setEnabled(False)
