@@ -30,7 +30,7 @@ class TaskWidget(QWidget):
         self.setLayout(self.layout)
 
         self.layout.setCurrentIndex(0)
-        self.editor.editingFinished.connect(self.editFinished)
+        self.editor.focusOut.connect(self.editFinished)
         self.task.modified.connect(self._update)
 
     def sizeHint(self):
@@ -68,6 +68,7 @@ class TaskWidget(QWidget):
             self.parent().setFocus()
             return
         elif event.key() in (Qt.Key_Enter, Qt.Key_Return):
+            self.editFinished()
             return
         QWidget.keyPressEvent(self, event)
 
@@ -209,3 +210,20 @@ class TasksListView(QListWidget):
         it = self.currentItem()
         if it:
             self.itemWidget(it).edit()
+
+    def currentTask(self):
+        it = self.currentItem()
+        if it:
+            return self.itemWidget(it).task
+        return None
+
+    def selectNext(self):
+        idx = self.currentIndex()
+        row = idx.row() + 1
+        print("ROW", row, self.count())
+        if row >= self.count():
+            print("HERE")
+            row = self.count() - 2
+        idx = idx.sibling(row, 0)
+        self.setCurrentIndex(idx)
+        print(self.currentTask())
